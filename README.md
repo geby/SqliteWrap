@@ -4,6 +4,8 @@ I was using his wrapper for long time, include my contributions. However it lost
 
 I start with code cleaning and create my own wrapper code as separate project. It have similar interface is Tim's wrapper, but is is very close to Sqlite API.
 
+[![Paypal donate](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate/?hosted_button_id=8U9Z2YP9J4DEA) 
+
 # Features
 * Require Sqlite3.dll at least version 3.7.1.
 * It is not component, just units. Include this wraper to your project uses and create classes for handling of database.
