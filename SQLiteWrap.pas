@@ -2,9 +2,15 @@
 
 Can be used for object based access to SQLite3 databases.
 
-Note: Requires Sqlite 3.6.8 and higher!
+Note: Requires Sqlite 3.7.1 and higher!
 
 Designed for Delphi 6+ and Freepascal, Unicode support for Delphi 2009+
+
+  V2.1.2
+    Fixed raising of Exceptions.
+
+  V2.1.1
+    Fixed call of ExecSQL for a statement what returning some rows.
 
   V2.1.0
     Added BLOB parameters and improved BLOB handling.
@@ -162,6 +168,10 @@ type
     procedure SetTimeout(Value: integer);
     {: Return SQLite engine version.}
     function Version: String;
+    {: Enable/disable suport for loaded extension libraries.}
+    procedure EnableLoadExtension(value: boolean);
+    {: Set chunk size for databaze file grow.}
+    procedure SetChunkSize(DatabaseName: ansistring; value: integer);
     {: Add custom sorting procedure as new Collate.}
     procedure AddCustomCollate(name: String; xCompare: TCollateXCompare);
     {: Add collate named SYSTEM for correct data sorting by user's locale}
@@ -264,7 +274,7 @@ resourcestring
   c_unknown = 'Unknown error';
   c_failopen = 'Failed to open database "%s" : %s';
   c_error = '.' + slinebreak + 'Error [%d]: %s.'+slinebreak+'"%s": %s';
-  c_nomessage = 'No message';
+  c_nomessage = 'Unknown error description';
   c_errorsql = 'Error executing SQL';
   c_errorprepare = 'Could not prepare SQL statement';
   c_errorexec = 'Error executing SQL statement';
@@ -342,16 +352,17 @@ end;
 procedure TSQLiteDatabase.RaiseError(const s, SQL: String);
 var
   Msg: PAnsiChar;
+  m: Ansistring;
   ret : integer;
 begin
   Msg := nil;
   ret := sqlite3_errcode(self.fDB);
   if ret <> SQLITE_OK then
     Msg := sqlite3_errmsg(self.fDB);
+  m := c_nomessage;
   if Msg <> nil then
-    raise ESqliteException.CreateFmt(s + c_error, [ret, SQLiteErrorStr(ret),SQL, Msg])
-  else
-    raise ESqliteException.CreateFmt(s, [SQL, c_nomessage]);
+    m := Msg;
+  raise ESqliteException.CreateFmt(s + c_error, [ret, SQLiteErrorStr(ret),SQL, m]);
 end;
 
 procedure TSQLiteDatabase.ExecSQL(const SQL: String);
@@ -370,7 +381,7 @@ begin
     SetParams(Stmt);
 
     iStepResult := Sqlite3_step(Stmt);
-    if (iStepResult <> SQLITE_DONE) then
+    if not(iStepResult in [SQLITE_DONE, SQLITE_ROW]) then
       begin
       SQLite3_reset(stmt);
       RaiseError(c_errorexec, SQL);
@@ -564,7 +575,7 @@ var
   x: integer;
 begin
   setlength(buffer, len);
-  x := value.Read(pointer(buffer[1])^, len);
+  x := value.Read(pointer(buffer)^, len);
   setlength(buffer, x);
   AddParamBlobText(name, buffer);
 end;
@@ -574,6 +585,7 @@ var
   n: integer;
   i: integer;
   par: TSQliteParam;
+  s, t: string;
 begin
   try
     for n := 0 to fParams.Count - 1 do
@@ -584,6 +596,34 @@ begin
       i := sqlite3_bind_parameter_index(Stmt, @par.name[1]);
       if i > 0 then
       begin
+        if assigned(OnQuery) then
+        begin
+          t := 'NULL';
+          s := 'NULL';
+          case par.valuetype of
+            SQLITE_INTEGER:
+              begin
+                t := 'INTEGER';
+                s := inttostr(par.valueinteger);
+              end;
+            SQLITE_FLOAT:
+              begin
+                t := 'FLOAT';
+                s := floattostr(par.valuefloat);
+              end;
+            SQLITE_TEXT:
+              begin
+                t := 'TEXT';
+                s := par.valuedata;
+              end;
+            SQLITE_BLOB:
+              begin
+                t := 'BLOB';
+                s := 'BLOB';
+              end;
+          end;
+          OnQuery(Self, format('Parameter: %s (%s) = %s',[par.name, t, s]));
+        end;
         case par.valuetype of
           SQLITE_INTEGER:
             sqlite3_bind_int64(Stmt, i, par.valueinteger);
@@ -622,6 +662,22 @@ end;
 function TSQLiteDatabase.InTransaction: Boolean;
 begin
   Result := SQLite3_Get_Autocommit(FDB) = 0;
+end;
+
+procedure TSQLiteDatabase.EnableLoadExtension(value: boolean);
+var
+  v: integer;
+begin
+  if value then
+    v := 1
+  else
+    v := 0;
+  SQLite3_enable_load_extension(FDB, v);
+end;
+
+procedure TSQLiteDatabase.SetChunkSize(DatabaseName: ansistring; value: integer);
+begin
+  SQLite3_file_control(FDB, PAnsiChar(DatabaseName), SQLITE_FCNTL_CHUNK_SIZE, @value);
 end;
 
 { TSQLiteTable }

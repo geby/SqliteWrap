@@ -14,6 +14,7 @@ unit SQLite3;
   which was based on SQLite.pas by Ben Hochstrasser (bhoc@surfeu.ch)
 
   Require: Delphi 6+, FreePascal
+  Sqlite 3.7.1+
 }
 
 {$IFDEF FPC}
@@ -141,18 +142,29 @@ function SQLite3_ColumnInt64(hStmt: TSqliteStmt; ColNum: integer): Int64; cdecl;
 function SQLite3_Finalize(hStmt: TSqliteStmt): integer; cdecl; external SQLiteDLL name 'sqlite3_finalize';
 function SQLite3_Reset(hStmt: TSqliteStmt): integer; cdecl; external SQLiteDLL name 'sqlite3_reset';
 function SQLite3_Get_Autocommit(db: TSQLiteDB): integer; cdecl; external SQLiteDLL name 'sqlite3_get_autocommit';
+function SQLite3_enable_load_extension(db: TSQLiteDB; OnOff: integer): integer; cdecl; external SQLiteDLL name 'sqlite3_enable_load_extension';
 
-// 
+const
+  SQLITE_FCNTL_LOCKSTATE       = 1;
+  SQLITE_GET_LOCKPROXYFILE     = 2;
+  SQLITE_SET_LOCKPROXYFILE     = 3;
+  SQLITE_LAST_ERRNO            = 4;
+  SQLITE_FCNTL_SIZE_HINT       = 5;
+  SQLITE_FCNTL_CHUNK_SIZE      = 6;
+  SQLITE_FCNTL_FILE_POINTER    = 7;
+  SQLITE_FCNTL_SYNC_OMITTED    = 8;
+function SQLite3_file_control(db: TSQLiteDB; filename: PAnsiChar; option: integer; data: pointer): integer; cdecl; external SQLiteDLL name 'sqlite3_file_control';
+
 // In the SQL strings input to sqlite3_prepare() and sqlite3_prepare16(),
 // one or more literals can be replace by a wildcard "?" or ":N:" where
 // N is an integer.  These value of these wildcard literals can be set
 // using the routines listed below.
-// 
+//
 // In every case, the first parameter is a pointer to the sqlite3_stmt
 // structure returned from sqlite3_prepare().  The second parameter is the
 // index of the wildcard.  The first "?" has an index of 1.  ":N:" wildcards
 // use the index N.
-// 
+//
 // The fifth parameter to sqlite3_bind_blob(), sqlite3_bind_text(), and
 //sqlite3_bind_text16() is a destructor used to dispose of the BLOB or
 //text after SQLite has finished with it.  If the fifth argument is the
