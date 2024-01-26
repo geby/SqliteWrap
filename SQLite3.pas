@@ -2,10 +2,18 @@ unit SQLite3;
 
 {
   Simplified interface for SQLite.
+
+  This version :Ported to D2009 Unicode by Roger Lascelles (support@veecad.com)
+  V2.0.0  29 June 2010
+
+  History
+  Reworked by Lukáš Gebauer at http://www.ararat.cz/doku.php/en:sqlitewrap.
   Updated for Sqlite 3 by Tim Anderson (tim@itwriting.com)
   Note: NOT COMPLETE for version 3, just minimal functionality
   Adapted from file created by Pablo Pissanetzky (pablo@myhtpc.net)
   which was based on SQLite.pas by Ben Hochstrasser (bhoc@surfeu.ch)
+
+  Require: Delphi 6+, FreePascal
 }
 
 {$IFDEF FPC}
@@ -187,15 +195,15 @@ function sqlite3_enable_shared_cache(Value: integer): integer; cdecl; external S
 function SQLite3_create_collation(db: TSQLiteDB; Name: PAnsiChar; eTextRep: integer;
   UserData: pointer; xCompare: TCollateXCompare): integer; cdecl; external SQLiteDLL name 'sqlite3_create_collation';
 
-function SQLiteFieldType(SQLiteFieldTypeCode: Integer): AnsiString;
-function SQLiteErrorStr(SQLiteErrorCode: Integer): AnsiString;
+function SQLiteFieldType(SQLiteFieldTypeCode: Integer): String;
+function SQLiteErrorStr(SQLiteErrorCode: Integer): String;
 
 implementation
 
 uses
   SysUtils;
 
-function SQLiteFieldType(SQLiteFieldTypeCode: Integer): AnsiString;
+function SQLiteFieldType(SQLiteFieldTypeCode: Integer): String;
 begin
   case SQLiteFieldTypeCode of
     SQLITE_INTEGER: Result := 'Integer';
@@ -208,7 +216,7 @@ begin
   end;
 end;
 
-function SQLiteErrorStr(SQLiteErrorCode: Integer): AnsiString;
+function SQLiteErrorStr(SQLiteErrorCode: Integer): String;
 begin
   case SQLiteErrorCode of
     SQLITE_OK: Result := 'Successful result';
@@ -243,14 +251,6 @@ begin
   else
     Result := 'Unknown SQLite Error Code "' + IntToStr(SQLiteErrorCode) + '"';
   end;
-end;
-
-function ColValueToStr(Value: PAnsiChar): AnsiString;
-begin
-  if (Value = nil) then
-    Result := 'NULL'
-  else
-    Result := Value;
 end;
 
 
