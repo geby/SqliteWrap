@@ -6,6 +6,19 @@ Note: Requires Sqlite 3.7.1 and higher!
 
 Designed for Delphi 6+ and Freepascal, Unicode support for Delphi 2009+
 
+  V3.0.0
+    Rework Unicode support. Library used on <D2007 and >D2009 returning same
+    Ansistring data. But on >D2009 you can read and write data by new Unicode
+    based methods too. With minimum implicit chartset conversions for the best
+    speed.
+
+  V2.2.1
+    Fixed "No argument for format 's'" error.
+
+  V2.2.0
+    Changed error handling, extended error codes are used.
+    Usage of Online Backup API
+
   V2.1.2
     Fixed raising of Exceptions.
 
@@ -81,7 +94,7 @@ interface
 {$ENDIF}
 
 uses
-  {$IFDEF WIN32}
+  {$IFDEF MSWINDOWS}
   Windows,
   {$ENDIF}
   SQLite3, Classes, SysUtils;
@@ -114,6 +127,8 @@ type
     fDB: TSQLiteDB;
     fParams: TList;
     FOnQuery: THookQuery;
+    FBackupStop: boolean;
+    procedure DBRaiseError(DBHandle: TSQLiteDB; s, SQL: String);
     procedure RaiseError(const s, SQL: String);
     procedure SetParams(const Stmt: TSQLiteStmt);
   protected
@@ -142,10 +157,16 @@ type
     function GetTableValue(const SQL: String): int64;
     {: Run SQL command and value from first field in first row is returned.
        You can call before functions AddParam* for set query parameters.}
-    function GetTableString(const SQL: String): String;
+    function GetTableString(const SQL: String): AnsiString;
+{$IFDEF SQUNI}
+    function GetTableStringUnicode(const SQL: String): Utf8String;
+{$ENDIF}
     {: Run SQL command and values from first field in each row is filled to stringlist.
        You can call before functions AddParam* for set query parameters.}
     procedure GetTableStrings(const SQL: String; const Value: TStrings);
+{$IFDEF SQUNI}
+    procedure GetTableStringsUnicode(const SQL: String; const Value: TStrings);
+{$ENDIF}
     {: Return @True if database is in transaction state.}
     function InTransaction: Boolean;
     {: Start transaction. You can modify transaction type by Param parameter.
@@ -183,7 +204,10 @@ type
     {: Add named query parameter of floating-point type.}
     procedure AddParamFloat(const name: String; value: double);
     {: Add named query parameter of string or binary type.}
-    procedure AddParamText(const name: String; const value: String);
+    procedure AddParamText(const name: String; const value: AnsiString);
+{$IFDEF SQUNI}
+    procedure AddParamTextUnicode(const name: String; const Value: Utf8String);
+{$ENDIF}
     {: Add named query parameter with null value.}
     procedure AddParamNull(const name: String);
     {: Add named query parameter of BLOB type from the memory buffer.}
@@ -192,6 +216,13 @@ type
     procedure AddParamBlobText(const name: String; const value: AnsiString);
     {: Add named query parameter of BLOB type from the stream.}
     procedure AddParamBlob(const name: String; const value: TStream; len: integer);
+    function DBLoadHandle(SourceDB: TSQliteDB): integer;
+    function DBLoadFile(const FileName: String): integer;
+    function DBSaveHandle(DestinationDB: TSQliteDB): integer;
+    function DBSaveFile(const FileName: String): integer;
+    function DBBackupHandle(DestinationDB: TSQliteDB): integer;
+    function DBBackupFile(const FileName: String): integer;
+    procedure DbBackupStop;
     {: SQLite database handler.}
     property DB: TSQLiteDB read fDB;
     {: Debug hook for log all called queries.}
@@ -208,7 +239,8 @@ type
     fStmt: TSQLiteStmt;
     fDB: TSQLiteDatabase;
     fSQL: String;
-    function GetFields(I: cardinal): String;
+    function GetFields(I: cardinal): AnsiString;
+    function GetFieldsUnicode(I: cardinal): RawByteString;
     function GetColumns(I: integer): String;
     function GetFieldByName(FieldName: String): String;
     function GetFieldIndex(FieldName: String): integer;
@@ -228,7 +260,10 @@ type
     {: Test if field from current row contains null value.}
     function FieldIsNull(I: cardinal): boolean;
     {: Read field from current row as string.}
-    function FieldAsString(I: cardinal): String;
+    function FieldAsString(I: cardinal): AnsiString;
+{$IFDEF SQUNI}
+    function FieldAsStringUnicode(I: cardinal): Utf8String;
+{$ENDIF}
     {: Read field from current row as floating-point.}
     function FieldAsDouble(I: cardinal): double;
     {: Go to next row.}
@@ -243,7 +278,10 @@ type
     {: Add named query parameter of floating-point type.}
     procedure AddParamFloat(const name: String; value: double);
     {: Add named query parameter of string or binary type.}
-    procedure AddParamText(const name: String; const value: String);
+    procedure AddParamText(const name: String; const value: AnsiString);
+{$IFDEF SQUNI}
+    procedure AddParamTextUnicode(const name: String; const Value: Utf8String);
+{$ENDIF}
     {: Add named query parameter with null value.}
     procedure AddParamNull(const name: String);
     {: Add named query parameter of BLOB type from memory buffer.}
@@ -253,7 +291,7 @@ type
     {: Add named query parameter of BLOB type from stream.}
     procedure AddParamBlob(const name: String; const value: TStream; len: integer);
     {: Return value of some field in current row.}
-    property Fields[I: cardinal]: String read GetFields;
+    property Fields[I: cardinal]: AnsiString read GetFields;
     {: Return value of named field in current row.}
     property FieldByName[FieldName: String]: String read GetFieldByName;
     {: Return index of some named field.}
@@ -272,8 +310,8 @@ implementation
 
 resourcestring
   c_unknown = 'Unknown error';
-  c_failopen = 'Failed to open database "%s" : %s';
-  c_error = '.' + slinebreak + 'Error [%d]: %s.'+slinebreak+'"%s": %s';
+  c_failopen = 'Failed to open database';
+  c_error = slinebreak + '%s [%d]: %s'+slinebreak+'%s';
   c_nomessage = 'Unknown error description';
   c_errorsql = 'Error executing SQL';
   c_errorprepare = 'Could not prepare SQL statement';
@@ -281,8 +319,9 @@ resourcestring
   c_errorempty = 'Field %s Not found. Empty dataset';
   c_errorfield = 'Field not found in dataset: %s';
   c_errordata = 'Could not retrieve data';
+  c_backuperror = 'Could not copy database';
 
-{$IFDEF WIN32}
+{$IFDEF MSWINDOWS}
 function SystemCollate(Userdta: pointer; Buf1Len: integer; Buf1: pointer;
     Buf2Len: integer; Buf2: pointer): integer; cdecl;
 begin
@@ -301,34 +340,177 @@ var
 begin
   inherited Create;
   fParams := TList.Create;
-  Msg := nil;
   fDb := nil;
-  try
-    {$IFDEF SQUNI}
-    iResult := SQLite3_Open(PAnsiChar(UTF8String(FileName)), Fdb);
-    {$ELSE}
-    iResult := SQLite3_Open(PAnsiChar(AnsiToUtf8(FileName)), Fdb);
-    {$ENDIF}
-    if iResult <> SQLITE_OK then
-    begin
-      s := c_unknown;
-      if Assigned(Fdb) then
+  {$IFDEF SQUNI}
+  iResult := SQLite3_Open(PAnsiChar(UTF8String(FileName)), Fdb);
+  {$ELSE}
+  iResult := SQLite3_Open(PAnsiChar(AnsiToUtf8(FileName)), Fdb);
+  {$ENDIF}
+  if iResult <> SQLITE_OK then
+  begin
+    try
+      if fDB <> nil then
+        RaiseError(c_failopen, FileName)
+      else
       begin
-        Msg := Sqlite3_ErrMsg(Fdb);
-        s := String(UTF8String(Msg));
+        Msg := sqlite3_errstr(iResult);
+        s := c_nomessage;
+        if Msg <> nil then
+        begin
+          //Msg is UTF8!
+          {$IFDEF SQUNI}
+          s := String(UTF8String(Msg));
+          {$ELSE}
+          s := Utf8ToAnsi(Msg);
+          {$ENDIF}
+        end;
+        raise ESqliteException.CreateFmt(c_failopen + c_error, [SQLiteErrorType(iResult), iResult, s, FileName]);
       end;
-      raise ESqliteException.CreateFmt(c_failopen, [FileName, s]);
+    finally
+      sqlite3_close(fDB); //harmless if fDB = nul
     end;
-  finally
-    if Assigned(Msg) then
-      SQLite3_Free(Msg);
   end;
 end;
 
+function TSQLiteDatabase.DBBackupFile(const FileName: String): integer;
+var
+  rc: integer;
+  sdb: TSQLiteDB;
+begin
+  sdb := nil;
+  {$IFDEF SQUNI}
+  rc := SQLite3_Open(PAnsiChar(UTF8String(FileName)), sdb);
+  {$ELSE}
+  rc := SQLite3_Open(PAnsiChar(AnsiToUtf8(FileName)), sdb);
+  {$ENDIF}
+  try
+    if rc = SQLITE_OK then
+      rc := DBBackupHandle(sdb);
+  finally
+    sqlite3_close(sdb);
+  end;
+  Result := rc;
+end;
+
+function TSQLiteDatabase.DBBackupHandle(DestinationDB: TSQliteDB): integer;
+var
+  backup: TSQLiteBackup;
+  rc: integer;
+begin
+  FBackupStop := false;
+  backup := sqlite3_backup_init(DestinationDB, 'main', self.fDB, 'main');
+  if backup <> nil then
+  begin
+    repeat
+      rc := sqlite3_backup_step(backup, 64);
+      if (rc = SQLITE_OK) or (rc = SQLITE_BUSY) or (rc = SQLITE_LOCKED) then
+        sleep(10);
+      if FBackupStop then
+        Break;
+    until not((rc = SQLITE_OK) or (rc = SQLITE_BUSY) or (rc = SQLITE_LOCKED));
+    sqlite3_backup_finish(backup);
+  end;
+  rc := sqlite3_errcode(DestinationDB);
+  Result := rc;
+end;
+
+procedure TSQLiteDatabase.DbBackupStop;
+begin
+  FBackupStop := true;
+end;
+
+function TSQLiteDatabase.DBLoadFile(const FileName: String): integer;
+var
+  rc: integer;
+  sdb: TSQLiteDB;
+begin
+  sdb := nil;
+  {$IFDEF SQUNI}
+  rc := SQLite3_Open(PAnsiChar(UTF8String(FileName)), sdb);
+  {$ELSE}
+  rc := SQLite3_Open(PAnsiChar(AnsiToUtf8(FileName)), sdb);
+  {$ENDIF}
+  try
+    if rc = SQLITE_OK then
+      rc := DBLoadHandle(sdb);
+  finally
+    sqlite3_close(sdb);
+  end;
+  Result := rc;
+end;
+
+function TSQLiteDatabase.DBLoadHandle(SourceDB: TSQliteDB): integer;
+var
+  backup: TSQLiteBackup;
+  rc: integer;
+begin
+  backup := sqlite3_backup_init(self.fDB, 'main', SourceDB, 'main');
+  if backup <> nil then
+  begin
+    sqlite3_backup_step(backup, -1);
+    sqlite3_backup_finish(backup);
+  end;
+  rc := sqlite3_errcode(self.fDB);
+  Result := rc;
+end;
+
+function TSQLiteDatabase.DBSaveFile(const FileName: String): integer;
+var
+  rc: integer;
+  sdb: TSQLiteDB;
+begin
+  sdb := nil;
+  {$IFDEF SQUNI}
+  rc := SQLite3_Open(PAnsiChar(UTF8String(FileName)), sdb);
+  {$ELSE}
+  rc := SQLite3_Open(PAnsiChar(AnsiToUtf8(FileName)), sdb);
+  {$ENDIF}
+  try
+    if rc = SQLITE_OK then
+      rc := DBSaveHandle(sdb);
+  finally
+    sqlite3_close(sdb);
+  end;
+  Result := rc;
+end;
+
+function TSQLiteDatabase.DBSaveHandle(DestinationDB: TSQliteDB): integer;
+var
+  backup: TSQLiteBackup;
+  rc: integer;
+begin
+  backup := sqlite3_backup_init(DestinationDB, 'main', self.fDB, 'main');
+  if backup <> nil then
+  begin
+    sqlite3_backup_step(backup, -1);
+    sqlite3_backup_finish(backup);
+  end;
+  rc := sqlite3_errcode(DestinationDB);
+  Result := rc;
+end;
+
 destructor TSQLiteDatabase.Destroy;
+var
+  r: integer;
+  i: integer;
+const
+  close_timeout = 5000;
+  close_delay = 100;
 begin
   if Assigned(fDB) then
-    SQLite3_Close(fDB);
+  begin
+    i := 0;
+    repeat
+      r := SQLite3_Close(fDB);
+      if r <> SQLITE_OK then
+      begin
+        sleep(100);
+        inc(i);
+      end;
+      if (i * close_delay) >= close_timeout then
+        Break;
+    until r = SQLITE_OK;
+  end;
   ParamsClear;
   fParams.Free;
   inherited;
@@ -349,20 +531,33 @@ begin
   Result := SQLite3_TotalChanges(self.fDB);
 end;
 
-procedure TSQLiteDatabase.RaiseError(const s, SQL: String);
+procedure TSQLiteDatabase.DBRaiseError(DBHandle: TSQLiteDB; s, SQL: String);
 var
   Msg: PAnsiChar;
-  m: Ansistring;
+  m: string;
   ret : integer;
 begin
-  Msg := nil;
-  ret := sqlite3_errcode(self.fDB);
-  if ret <> SQLITE_OK then
-    Msg := sqlite3_errmsg(self.fDB);
+  ret := sqlite3_extended_errcode(DBHandle);
+  if (ret = SQLITE_OK) or (ret = SQLITE_DONE) then
+    exit;
+  Msg := sqlite3_errmsg(DBHandle);
   m := c_nomessage;
   if Msg <> nil then
-    m := Msg;
-  raise ESqliteException.CreateFmt(s + c_error, [ret, SQLiteErrorStr(ret),SQL, m]);
+  begin
+    //Msg is UTF8!
+    {$IFDEF SQUNI}
+    m := String(UTF8String(Msg));
+    {$ELSE}
+    m := Utf8ToAnsi(Msg);
+    {$ENDIF}
+  end;
+  SQL := StringReplace(SQL, '%', '%%', [rfReplaceAll]);
+  raise ESqliteException.CreateFmt(s + c_error, [SQLiteErrorType(ret), ret, m, SQL]);
+end;
+
+procedure TSQLiteDatabase.RaiseError(const s, SQL: String);
+begin
+  DBRaiseError(self.fDB, s, SQL);
 end;
 
 procedure TSQLiteDatabase.ExecSQL(const SQL: String);
@@ -411,7 +606,7 @@ begin
   end;
 end;
 
-function TSQLiteDatabase.GetTableString(const SQL: String): String;
+function TSQLiteDatabase.GetTableString(const SQL: String): AnsiString;
 var
   Table: TSQLiteTable;
 begin
@@ -442,6 +637,42 @@ begin
     Table.Free;
   end;
 end;
+
+{$IFDEF SQUNI}
+procedure TSQLiteDatabase.GetTableStringsUnicode(const SQL: String;
+  const Value: TStrings);
+var
+  Table: TSQLiteTable;
+begin
+  Value.Clear;
+  Table := self.GetTable(SQL);
+  try
+    while not table.EOF do
+    begin
+      Value.Add(string(Table.FieldAsStringUnicode(0)));
+      table.Next;
+    end;
+  finally
+    Table.Free;
+  end;
+end;
+{$ENDIF}
+
+{$IFDEF SQUNI}
+function TSQLiteDatabase.GetTableStringUnicode(const SQL: String): Utf8String;
+var
+  Table: TSQLiteTable;
+begin
+  Result := '';
+  Table := self.GetTable(SQL);
+  try
+    if not Table.EOF then
+      Result := Table.FieldAsStringUnicode(0);
+  finally
+    Table.Free;
+  end;
+end;
+{$ENDIF}
 
 procedure TSQLiteDatabase.Start(const name:String; const param: String = '');
 var
@@ -492,7 +723,7 @@ end;
 
 procedure TSQLiteDatabase.AddSystemCollate;
 begin
-  {$IFDEF WIN32}
+  {$IFDEF MSWINDOWS}
   sqlite3_create_collation(fdb, 'SYSTEM', SQLITE_UTF16LE, nil, @SystemCollate);
   {$ENDIF}
 end;
@@ -528,16 +759,31 @@ begin
   fParams.Add(par);
 end;
 
-procedure TSQLiteDatabase.AddParamText(const name: String; const value: String);
+procedure TSQLiteDatabase.AddParamText(const name: String; const value: AnsiString);
 var
   par: TSQliteParam;
 begin
   par := TSQliteParam.Create;
   par.name := UTF8String( name );
   par.valuetype := SQLITE_TEXT;
-  par.valuedata := UTF8String( value );
+  setlength(par.valuedata, length(value));
+  if length(value) > 0 then
+    move(PAnsiChar(Value)^, pointer(par.valuedata)^, length(Value));
   fParams.Add(par);
 end;
+
+{$IFDEF SQUNI}
+procedure TSQLiteDatabase.AddParamTextUnicode(const name: String; const Value: Utf8String);
+var
+  par: TSQliteParam;
+begin
+  par := TSQliteParam.Create;
+  par.name := UTF8String(name);
+  par.valuetype := SQLITE_TEXT;
+  par.valuedata := value;
+  fParams.Add(par);
+end;
+{$ENDIF}
 
 procedure TSQLiteDatabase.AddParamNull(const name: String);
 var
@@ -614,7 +860,7 @@ begin
             SQLITE_TEXT:
               begin
                 t := 'TEXT';
-                s := par.valuedata;
+                s := string(par.valuedata);
               end;
             SQLITE_BLOB:
               begin
@@ -715,23 +961,35 @@ begin
     sqlite3_bind_null(FStmt, i);
 end;
 
-procedure TSQLiteTable.AddParamText(const name : string; const value: String);
+procedure TSQLiteTable.AddParamText(const name : string; const value: AnsiString);
 var
   i: integer;
-  valueUTF8 : UTF8String;
+begin
+  if name = '' then
+    exit;
+  i := sqlite3_bind_parameter_index(FStmt, @UTF8String(name)[1] );
+  if i > 0 then
+    sqlite3_bind_text(FStmt, i, pansichar(value), length(value), SQLITE_TRANSIENT);
+end;
+
+{$IFDEF SQUNI}
+procedure TSQLiteTable.AddParamTextUnicode(const name: String;
+  const Value: Utf8String);
+var
+  i: integer;
 begin
   if name = '' then
     exit;
   i := sqlite3_bind_parameter_index(FStmt, @UTF8String(name)[1] );
   if i > 0 then
   begin
-    valueUTF8 := UTF8String( value );
-    if valueUTF8 = '' then
-      sqlite3_bind_text(FStmt, i, pansichar(valueUTF8), 0, SQLITE_TRANSIENT)
+    if value = '' then
+      sqlite3_bind_text(FStmt, i, pansichar(value), 0, SQLITE_TRANSIENT)
     else
-      sqlite3_bind_text(FStmt, i, @valueUTF8[1], length(valueUTF8), SQLITE_TRANSIENT);
+      sqlite3_bind_text(FStmt, i, @value[1], length(value), SQLITE_TRANSIENT);
   end;
 end;
+{$ENDIF}
 
 procedure TSQLiteTable.AddParamBlobPtr(const name: String; buffer: pointer; len: integer);
 var
@@ -760,7 +1018,7 @@ begin
   if name = '' then
     exit;
   setlength(buffer, len);
-  x := value.Read(pointer(buffer[1])^, len);
+  x := value.Read(pointer(buffer)^, len);
   setlength(buffer, x);
   AddParamBlobText(name, buffer);
 end;
@@ -783,6 +1041,7 @@ begin
   DB.DoQuery(SQL);
   //get data types
   fCols := TStringList.Create;
+  fCols.Capacity := 32;
   fColCount := SQLite3_ColumnCount(fstmt);
   for i := 0 to Pred(fColCount) do
     // AnsiUpperCase operates on UNICODE strings but according to Ansi Collation Rules!
@@ -838,15 +1097,6 @@ begin
         MemStream.position := 0;
         Buffer := MemStream.Memory;
         SetString(Result, Buffer, MemStream.size);
-//        {$IFDEF UNICODE}
-//        Buffer := AnsiStralloc(MemStream.Size + 1);
-//        {$ELSE}
-//        Buffer := Stralloc(MemStream.Size + 1);
-//        {$ENDIF}
-//        MemStream.readbuffer(Buffer[0], MemStream.Size);
-//        (Buffer + MemStream.Size)^ := chr(0);
-//        SetString(Result, Buffer, MemStream.size);
-//        strdispose(Buffer);
       end;
      finally
      MemStream.Free;
@@ -863,10 +1113,17 @@ begin
   Result := Sqlite3_ColumnInt64(fstmt, i);
 end;
 
-function TSQLiteTable.FieldAsString(I: cardinal): String;
+function TSQLiteTable.FieldAsString(I: cardinal): AnsiString;
 begin
   Result := self.GetFields(I);
 end;
+
+{$IFDEF SQUNI}
+function TSQLiteTable.FieldAsStringUnicode(I: cardinal): Utf8String;
+begin
+  Result := self.GetFieldsUnicode(I);
+end;
+{$ENDIF}
 
 function TSQLiteTable.FieldIsNull(I: cardinal): boolean;
 begin
@@ -902,10 +1159,18 @@ begin
   end;
 end;
 
-function TSQLiteTable.GetFields(I: cardinal): String;
+function TSQLiteTable.GetFields(I: cardinal): AnsiString;
 begin
-  Result := String(UTF8String((Sqlite3_ColumnText(fstmt, i))));
+  Result := Sqlite3_ColumnText(fstmt, i);
 end;
+
+{$IFDEF SQUNI}
+function TSQLiteTable.GetFieldsUnicode(I: cardinal): RawByteString;
+begin
+  Result := Sqlite3_ColumnText(fstmt, i);
+  SetCodePage(Result, CP_UTF8, false);
+end;
+{$ENDIF}
 
 function TSQLiteTable.Next: boolean;
 var

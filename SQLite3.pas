@@ -3,8 +3,12 @@ unit SQLite3;
 {
   Simplified interface for SQLite.
 
-  This version :Ported to D2009 Unicode by Roger Lascelles (support@veecad.com)
-  V2.0.0  29 June 2010
+  V2.1.0  2012-12-19
+    Added Online-Backup API
+    Extended Error Codes
+
+  V2.0.0  2010-07-29
+    Ported to D2009 Unicode by Roger Lascelles (support@veecad.com)
 
   History
   Reworked by Lukáš Gebauer at http://www.ararat.cz/doku.php/en:sqlitewrap.
@@ -38,11 +42,9 @@ const
   SQLiteDLL = 'sqlite3.so';
 {$IFEND}
 
-// Return values for sqlite3_exec() and sqlite3_step()
-
 const
   SQLITE_OK          =  0; // Successful result
-  (* beginning-of-error-codes *)
+  //Standard error codes
   SQLITE_ERROR       =  1; // SQL error or missing database
   SQLITE_INTERNAL    =  2; // An internal logic error in SQLite
   SQLITE_PERM        =  3; // Access permission denied
@@ -72,6 +74,40 @@ const
   SQLITE_ROW         = 100; // sqlite3_step() has another row ready
   SQLITE_DONE        = 101; // sqlite3_step() has finished executing
 
+  //Extended error codes
+  SQLITE_IOERR_READ              = SQLITE_IOERR or (1 shl 8);
+  SQLITE_IOERR_SHORT_READ        = SQLITE_IOERR or (2 shl 8);
+  SQLITE_IOERR_WRITE             = SQLITE_IOERR or (3 shl 8);
+  SQLITE_IOERR_FSYNC             = SQLITE_IOERR or (4 shl 8);
+  SQLITE_IOERR_DIR_FSYNC         = SQLITE_IOERR or (5 shl 8);
+  SQLITE_IOERR_TRUNCATE          = SQLITE_IOERR or (6 shl 8);
+  SQLITE_IOERR_FSTAT             = SQLITE_IOERR or (7 shl 8);
+  SQLITE_IOERR_UNLOCK            = SQLITE_IOERR or (8 shl 8);
+  SQLITE_IOERR_RDLOCK            = SQLITE_IOERR or (9 shl 8);
+  SQLITE_IOERR_DELETE            = SQLITE_IOERR or (10 shl 8);
+  SQLITE_IOERR_BLOCKED           = SQLITE_IOERR or (11 shl 8);
+  SQLITE_IOERR_NOMEM             = SQLITE_IOERR or (12 shl 8);
+  SQLITE_IOERR_ACCESS            = SQLITE_IOERR or (13 shl 8);
+  SQLITE_IOERR_CHECKRESERVEDLOCK = SQLITE_IOERR or (14 shl 8);
+  SQLITE_IOERR_LOCK              = SQLITE_IOERR or (15 shl 8);
+  SQLITE_IOERR_CLOSE             = SQLITE_IOERR or (16 shl 8);
+  SQLITE_IOERR_DIR_CLOSE         = SQLITE_IOERR or (17 shl 8);
+  SQLITE_IOERR_SHMOPEN           = SQLITE_IOERR or (18 shl 8);
+  SQLITE_IOERR_SHMSIZE           = SQLITE_IOERR or (19 shl 8);
+  SQLITE_IOERR_SHMLOCK           = SQLITE_IOERR or (20 shl 8);
+  SQLITE_IOERR_SHMMAP            = SQLITE_IOERR or (21 shl 8);
+  SQLITE_IOERR_SEEK              = SQLITE_IOERR or (22 shl 8);
+  SQLITE_IOERR_DELETE_NOENT      = SQLITE_IOERR or (23 shl 8);
+  SQLITE_LOCKED_SHAREDCACHE      = SQLITE_LOCKED or  (1 shl 8);
+  SQLITE_BUSY_RECOVERY           = SQLITE_BUSY   or  (1 shl 8);
+  SQLITE_CANTOPEN_NOTEMPDIR      = SQLITE_CANTOPEN or (1 shl 8);
+  SQLITE_CANTOPEN_ISDIR          = SQLITE_CANTOPEN or (2 shl 8);
+  SQLITE_CANTOPEN_FULLPATH       = SQLITE_CANTOPEN or (3 shl 8);
+  SQLITE_CORRUPT_VTAB            = SQLITE_CORRUPT or (1 shl 8);
+  SQLITE_READONLY_RECOVERY       = SQLITE_READONLY or (1 shl 8);
+  SQLITE_READONLY_CANTLOCK       = SQLITE_READONLY or (2 shl 8);
+  SQLITE_ABORT_ROLLBACK          = SQLITE_ABORT or (2 shl 8);
+
   SQLITE_INTEGER = 1;
   SQLITE_FLOAT   = 2;
   SQLITE_TEXT    = 3;
@@ -91,6 +127,7 @@ type
   TSQLiteDB = Pointer;
   TSQLiteResult = ^PAnsiChar;
   TSQLiteStmt = Pointer;
+  TSQLiteBackup = Pointer;
 
 type
   PPAnsiCharArray = ^TPAnsiCharArray; 
@@ -114,6 +151,8 @@ function SQLite3_Exec(db: TSQLiteDB; SQLStatement: PAnsiChar; CallbackPtr: TSQLi
 function SQLite3_Version(): PAnsiChar; cdecl; external SQLiteDLL name 'sqlite3_libversion';
 function SQLite3_ErrMsg(db: TSQLiteDB): PAnsiChar; cdecl; external SQLiteDLL name 'sqlite3_errmsg';
 function SQLite3_ErrCode(db: TSQLiteDB): integer; cdecl; external SQLiteDLL name 'sqlite3_errcode';
+function SQLite3_Extended_ErrCode(db: TSQLiteDB): integer; cdecl; external SQLiteDLL name 'sqlite3_extended_errcode';
+function SQLite3_ErrStr(ErrorCode: integer): PAnsiChar; cdecl; external SQLiteDLL name 'sqlite3_errstr';
 procedure SQlite3_Free(P: PAnsiChar); cdecl; external SQLiteDLL name 'sqlite3_free';
 function SQLite3_GetTable(db: TSQLiteDB; SQLStatement: PAnsiChar; var ResultPtr: TSQLiteResult; var RowCount: Cardinal; var ColCount: Cardinal; var ErrMsg: PAnsiChar): integer; cdecl; external SQLiteDLL name 'sqlite3_get_table';
 procedure SQLite3_FreeTable(Table: TSQLiteResult); cdecl; external SQLiteDLL name 'sqlite3_free_table';
@@ -176,7 +215,7 @@ function SQLite3_file_control(db: TSQLiteDB; filename: PAnsiChar; option: intege
 // The sqlite3_bind_* routine must be called before sqlite3_step() after
 // an sqlite3_prepare() or sqlite3_reset().  Unbound wildcards are interpreted
 // as NULL.
-// 
+//
 
 type
   TSQLite3Destructor = procedure(Ptr: Pointer); cdecl;
@@ -207,8 +246,16 @@ function sqlite3_enable_shared_cache(Value: integer): integer; cdecl; external S
 function SQLite3_create_collation(db: TSQLiteDB; Name: PAnsiChar; eTextRep: integer;
   UserData: pointer; xCompare: TCollateXCompare): integer; cdecl; external SQLiteDLL name 'sqlite3_create_collation';
 
+//Backup API
+function sqlite3_backup_init(Dest: TSQLiteDB; const DestName: PAnsiChar;
+  Source: TSQLiteDB; const SourceName: PAnsiChar): TSQLiteBackup; cdecl; external SQLiteDLL name 'sqlite3_backup_init';
+function sqlite3_backup_step(p: TSQLiteBackup; nPage: integer): integer; cdecl; external SQLiteDLL name 'sqlite3_backup_step';
+function sqlite3_backup_finish(p: TSQLiteBackup): integer; cdecl; external SQLiteDLL name 'sqlite3_backup_finish';
+function sqlite3_backup_remaining(p: TSQLiteBackup): integer; cdecl; external SQLiteDLL name 'sqlite3_backup_remaining';
+function sqlite3_backup_pagecount(p: TSQLiteBackup): integer; cdecl; external SQLiteDLL name 'sqlite3_backup_pagecount';
+
 function SQLiteFieldType(SQLiteFieldTypeCode: Integer): String;
-function SQLiteErrorStr(SQLiteErrorCode: Integer): String;
+function SQLiteErrorType(SQLiteErrorCode: Integer): String;
 
 implementation
 
@@ -228,43 +275,74 @@ begin
   end;
 end;
 
-function SQLiteErrorStr(SQLiteErrorCode: Integer): String;
+function SQLiteErrorType(SQLiteErrorCode: Integer): String;
 begin
   case SQLiteErrorCode of
-    SQLITE_OK: Result := 'Successful result';
-    SQLITE_ERROR: Result := 'SQL error or missing database';
-    SQLITE_INTERNAL: Result := 'An internal logic error in SQLite';
-    SQLITE_PERM: Result := 'Access permission denied';
-    SQLITE_ABORT: Result := 'Callback routine requested an abort';
-    SQLITE_BUSY: Result := 'The database file is locked';
-    SQLITE_LOCKED: Result := 'A table in the database is locked';
-    SQLITE_NOMEM: Result := 'A malloc() failed';
-    SQLITE_READONLY: Result := 'Attempt to write a readonly database';
-    SQLITE_INTERRUPT: Result := 'Operation terminated by sqlite3_interrupt()';
-    SQLITE_IOERR: Result := 'Some kind of disk I/O error occurred';
-    SQLITE_CORRUPT: Result := 'The database disk image is malformed';
-    SQLITE_NOTFOUND: Result := '(Internal Only) Table or record not found';
-    SQLITE_FULL: Result := 'Insertion failed because database is full';
-    SQLITE_CANTOPEN: Result := 'Unable to open the database file';
-    SQLITE_PROTOCOL: Result := 'Database lock protocol error';
-    SQLITE_EMPTY: Result := 'Database is empty';
-    SQLITE_SCHEMA: Result := 'The database schema changed';
-    SQLITE_TOOBIG: Result := 'Too much data for one row of a table';
-    SQLITE_CONSTRAINT: Result := 'Abort due to contraint violation';
-    SQLITE_MISMATCH: Result := 'Data type mismatch';
-    SQLITE_MISUSE: Result := 'Library used incorrectly';
-    SQLITE_NOLFS: Result := 'Uses OS features not supported on host';
-    SQLITE_AUTH: Result := 'Authorization denied';
-    SQLITE_FORMAT: Result := 'Auxiliary database format error';
-    SQLITE_RANGE: Result := '2nd parameter to sqlite3_bind out of range';
-    SQLITE_NOTADB: Result := 'File opened that is not a database file';
-    SQLITE_ROW: Result := 'sqlite3_step() has another row ready';
-    SQLITE_DONE: Result := 'sqlite3_step() has finished executing';
+    SQLITE_OK          : Result :='SQLITE_OK';
+    SQLITE_ERROR       : Result :='SQLITE_ERROR';
+    SQLITE_INTERNAL    : Result :='SQLITE_INTERNAL';
+    SQLITE_PERM        : Result :='SQLITE_PERM';
+    SQLITE_ABORT       : Result :='SQLITE_ABORT';
+    SQLITE_BUSY        : Result :='SQLITE_BUSY';
+    SQLITE_LOCKED      : Result :='SQLITE_LOCKED';
+    SQLITE_NOMEM       : Result :='SQLITE_NOMEM';
+    SQLITE_READONLY    : Result :='SQLITE_READONLY';
+    SQLITE_INTERRUPT   : Result :='SQLITE_INTERRUPT';
+    SQLITE_IOERR       : Result :='SQLITE_IOERR';
+    SQLITE_CORRUPT     : Result :='SQLITE_CORRUPT';
+    SQLITE_NOTFOUND    : Result :='SQLITE_NOTFOUND';
+    SQLITE_FULL        : Result :='SQLITE_FULL';
+    SQLITE_CANTOPEN    : Result :='SQLITE_CANTOPEN';
+    SQLITE_PROTOCOL    : Result :='SQLITE_PROTOCOL';
+    SQLITE_EMPTY       : Result :='SQLITE_EMPTY';
+    SQLITE_SCHEMA      : Result :='SQLITE_SCHEMA';
+    SQLITE_TOOBIG      : Result :='SQLITE_TOOBIG';
+    SQLITE_CONSTRAINT  : Result :='SQLITE_CONSTRAINT';
+    SQLITE_MISMATCH    : Result :='SQLITE_MISMATCH';
+    SQLITE_MISUSE      : Result :='SQLITE_MISUSE';
+    SQLITE_NOLFS       : Result :='SQLITE_NOLFS';
+    SQLITE_AUTH        : Result :='SQLITE_AUTH';
+    SQLITE_FORMAT      : Result :='SQLITE_FORMAT';
+    SQLITE_RANGE       : Result :='SQLITE_RANGE';
+    SQLITE_NOTADB      : Result :='SQLITE_NOTADB';
+    SQLITE_ROW         : Result :='SQLITE_ROW';
+    SQLITE_DONE        : Result :='SQLITE_DONE';
+    SQLITE_IOERR_READ              : Result :='SQLITE_IOERR_READ';
+    SQLITE_IOERR_SHORT_READ        : Result :='SQLITE_IOERR_SHORT_READ';
+    SQLITE_IOERR_WRITE             : Result :='SQLITE_IOERR_WRITE';
+    SQLITE_IOERR_FSYNC             : Result :='SQLITE_IOERR_FSYNC';
+    SQLITE_IOERR_DIR_FSYNC         : Result :='SQLITE_IOERR_DIR_FSYNC';
+    SQLITE_IOERR_TRUNCATE          : Result :='SQLITE_IOERR_TRUNCATE';
+    SQLITE_IOERR_FSTAT             : Result :='SQLITE_IOERR_FSTAT';
+    SQLITE_IOERR_UNLOCK            : Result :='SQLITE_IOERR_UNLOCK';
+    SQLITE_IOERR_RDLOCK            : Result :='SQLITE_IOERR_RDLOCK';
+    SQLITE_IOERR_DELETE            : Result :='SQLITE_IOERR_DELETE';
+    SQLITE_IOERR_BLOCKED           : Result :='SQLITE_IOERR_BLOCKED';
+    SQLITE_IOERR_NOMEM             : Result :='SQLITE_IOERR_NOMEM';
+    SQLITE_IOERR_ACCESS            : Result :='SQLITE_IOERR_ACCESS';
+    SQLITE_IOERR_CHECKRESERVEDLOCK : Result :='SQLITE_IOERR_CHECKRESERVEDLOCK';
+    SQLITE_IOERR_LOCK              : Result :='SQLITE_IOERR_LOCK';
+    SQLITE_IOERR_CLOSE             : Result :='SQLITE_IOERR_CLOSE';
+    SQLITE_IOERR_DIR_CLOSE         : Result :='SQLITE_IOERR_DIR_CLOSE';
+    SQLITE_IOERR_SHMOPEN           : Result :='SQLITE_IOERR_SHMOPEN';
+    SQLITE_IOERR_SHMSIZE           : Result :='SQLITE_IOERR_SHMSIZE';
+    SQLITE_IOERR_SHMLOCK           : Result :='SQLITE_IOERR_SHMLOCK';
+    SQLITE_IOERR_SHMMAP            : Result :='SQLITE_IOERR_SHMMAP';
+    SQLITE_IOERR_SEEK              : Result :='SQLITE_IOERR_SEEK';
+    SQLITE_IOERR_DELETE_NOENT      : Result :='SQLITE_IOERR_DELETE_NOENT';
+    SQLITE_LOCKED_SHAREDCACHE      : Result :='SQLITE_LOCKED_SHAREDCACHE';
+    SQLITE_BUSY_RECOVERY           : Result :='SQLITE_BUSY_RECOVERY';
+    SQLITE_CANTOPEN_NOTEMPDIR      : Result :='SQLITE_CANTOPEN_NOTEMPDIR';
+    SQLITE_CANTOPEN_ISDIR          : Result :='SQLITE_CANTOPEN_ISDIR';
+    SQLITE_CANTOPEN_FULLPATH       : Result :='SQLITE_CANTOPEN_FULLPATH';
+    SQLITE_CORRUPT_VTAB            : Result :='SQLITE_CORRUPT_VTAB';
+    SQLITE_READONLY_RECOVERY       : Result :='SQLITE_READONLY_RECOVERY';
+    SQLITE_READONLY_CANTLOCK       : Result :='SQLITE_READONLY_CANTLOCK';
+    SQLITE_ABORT_ROLLBACK          : Result :='SQLITE_ABORT_ROLLBACK';
   else
     Result := 'Unknown SQLite Error Code "' + IntToStr(SQLiteErrorCode) + '"';
   end;
 end;
-
 
 end.
 

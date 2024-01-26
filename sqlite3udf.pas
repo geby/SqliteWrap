@@ -13,7 +13,7 @@ uses
 
 type
   Psqlite3_context = pointer;
-  Psqlite3_value = ppchar;
+  Psqlite3_value = ppansichar;
 
   TxFunc = procedure(sqlite3_context: Psqlite3_context; cArg: integer; ArgV: Psqlite3_value);
   TxStep = procedure(sqlite3_context: Psqlite3_context; cArg: integer; ArgV: Psqlite3_value);
@@ -25,7 +25,7 @@ type
 }
 
 //UDF SQLITE3 support
-function sqlite3_create_function(db: TSQLiteDB; functionName: PChar; nArg: integer;
+function sqlite3_create_function(db: TSQLiteDB; functionName: PAnsiChar; nArg: integer;
   eTextRep: integer; pUserdata: pointer; xFunc: TxFunc; xStep: TxStep; xFinal: TxFinal
   ): integer; cdecl; external SQLiteDLL name 'sqlite3_create_function';
 
@@ -33,7 +33,7 @@ procedure sqlite3_result_blob(sqlite3_context: Psqlite3_context; value: Pointer;
   n: integer; destroy: pointer); cdecl; external SQLiteDLL name 'sqlite3_result_blob';
 procedure sqlite3_result_double(sqlite3_context: Psqlite3_context; value: Double);
   cdecl; external SQLiteDLL name 'sqlite3_result_double';
-procedure sqlite3_result_error(sqlite3_context: Psqlite3_context; value: Pchar;
+procedure sqlite3_result_error(sqlite3_context: Psqlite3_context; value: Pansichar;
   n: integer); cdecl; external SQLiteDLL name 'sqlite3_result_error';
 procedure sqlite3_result_error16(sqlite3_context: Psqlite3_context; value: PWidechar;
   n: integer); cdecl; external SQLiteDLL name 'sqlite3_result_error16';
@@ -43,7 +43,7 @@ procedure sqlite3_result_int64(sqlite3_context: Psqlite3_context; value: int64);
   cdecl; external SQLiteDLL name 'sqlite3_result_int64';
 procedure sqlite3_result_null(sqlite3_context: Psqlite3_context);
   cdecl; external SQLiteDLL name 'sqlite3_result_null';
-procedure sqlite3_result_text(sqlite3_context: Psqlite3_context; value: PChar;
+procedure sqlite3_result_text(sqlite3_context: Psqlite3_context; value: PansiChar;
   n: integer; destroy: pointer); cdecl; external SQLiteDLL name 'sqlite3_result_text';
 procedure sqlite3_result_text16(sqlite3_context: Psqlite3_context; value: PWideChar;
   n: integer; destroy: pointer); cdecl; external SQLiteDLL name 'sqlite3_result_text16';
@@ -81,7 +81,7 @@ function sqlite3_value_int(value: pointer): integer;
   cdecl; external SQLiteDLL name 'sqlite3_value_int';
 function sqlite3_value_int64(value: pointer): int64;
   cdecl; external SQLiteDLL name 'sqlite3_value_int64';
-function sqlite3_value_text(value: pointer): PChar;
+function sqlite3_value_text(value: pointer): PAnsiChar;
   cdecl; external SQLiteDLL name 'sqlite3_value_text';
 function sqlite3_value_text16(value: pointer): PWideChar;
   cdecl; external SQLiteDLL name 'sqlite3_value_text16';
