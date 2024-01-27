@@ -34,7 +34,7 @@ Designed for Delphi 6+ and Freepascal, Unicode support for Delphi 2009+
     Ported to D2009 Unicode by Roger Lascelles (support@veecad.com)
 
   V1.0.0
-    by Lukáš Gebauer at http://www.ararat.cz/doku.php/en:sqlitewrap.
+    by Lukáš Gebauer at https://github.com/geby/SqliteWrap
     based on work by Tim Anderson (tim@itwriting.com)
 
 UNICODE HANDLING:
