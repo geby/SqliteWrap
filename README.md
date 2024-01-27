@@ -7,7 +7,7 @@ I start with code cleaning and create my own wrapper code as separate project. I
 [![Paypal donate](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate/?hosted_button_id=8U9Z2YP9J4DEA) 
 
 # Features
-* Require Sqlite3.dll at least version 3.7.1.
+* Require SQLite3 at least version 3.7.1.
 * It is not component, just units. Include this wraper to your project uses and create classes for handling of database.
 * It is not integrated into Delphi database model.
 * Very lightweight code.
@@ -17,6 +17,7 @@ I start with code cleaning and create my own wrapper code as separate project. I
 * You can use transactions, include savepoints!
 * You can define your own UDF (User defined SQL functions).
 * You can define your own collates.
+* Sqlite Backup API supported.
 
 # Sample
 ```
